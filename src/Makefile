@@ -26,7 +26,7 @@ HDF_LIBNAME ?= hdf5
 
 # C compiler options
 CFLAGS += -O2 -Wall -Werror -fno-strict-aliasing -I$(LEGION_DIR)/runtime -I$(LEGION_DIR)/bindings/regent
-CXXFLAGS += -std=c++11 -O3 -Wall -Werror -fno-strict-aliasing -I$(LEGION_DIR)/runtime -I$(LEGION_DIR)/bindings/regent
+CXXFLAGS += -std=c++14 -O3 -Wall -Werror -fno-strict-aliasing -I$(LEGION_DIR)/runtime -I$(LEGION_DIR)/bindings/regent
 
 # Regent options
 export INCLUDE_PATH := .
@@ -45,7 +45,7 @@ else
 ifeq ($(USE_CUDA), 1)
   REGENT_FLAGS += -fcuda 1 -fcuda-offline 1
   NVCC ?= $(CUDA_HOME)/bin/nvcc
-  NVCCFLAGS += -std=c++11 -O3 -I$(LEGION_DIR)/runtime -I$(LEGION_DIR)/bindings/regent
+  NVCCFLAGS += -std=c++14 -O3 -I$(LEGION_DIR)/runtime -I$(LEGION_DIR)/bindings/regent
 else
   REGENT_FLAGS += -fcuda 0
 endif
