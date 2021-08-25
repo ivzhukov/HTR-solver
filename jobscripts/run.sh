@@ -1,4 +1,5 @@
-#!/bin/bash -eu
+#!/bin/bash 
+set -x
 
 ###############################################################################
 # Helper functions
@@ -61,169 +62,74 @@ export LEGION_FREEZE_ON_ERROR="$DEBUG"
 # Machine-specific handling
 ###############################################################################
 
-function run_lassen {
-    GROUP="${GROUP:-stanford}"
-    export QUEUE="${QUEUE:-pbatch}"
-    DEPS=
-    if [[ ! -z "$AFTER" ]]; then
-        DEPS="-w done($AFTER)"
-    fi
-    bsub -G "$GROUP" \
-         -nnodes "$NUM_NODES" -W "$MINUTES" -q "$QUEUE" $DEPS \
-         "$HTR_DIR"/jobscripts/lassen.lsf
-}
-
-function run_yellowstone {
-    export QUEUE="${QUEUE:-gpu}"
-    DEPS=
-    if [[ ! -z "$AFTER" ]]; then
-        DEPS="-d afterok:$AFTER"
-    fi
-    EXCLUDED="$(paste -sd ',' "$HTR_DIR"/jobscripts/blacklist/yellowstone.txt)"
-    sbatch --export=ALL \
-        -N "$NUM_NODES" -t "$WALLTIME" -p "$QUEUE" $DEPS \
-        --exclude="$EXCLUDED" \
-        "$HTR_DIR"/jobscripts/yellowstone.slurm
-}
-
-function run_armstrong {
-    export QUEUE="${QUEUE:-compute}"
-    DEPS=
-    if [[ ! -z "$AFTER" ]]; then
-        DEPS="-d afterok:$AFTER"
-    fi
-    sbatch --export=ALL \
-        -N "$NUM_NODES" -t "$WALLTIME" -p "$QUEUE" $DEPS \
-        "$HTR_DIR"/jobscripts/armstrong.slurm
-}
-
-function run_sapling {
-    # Allocate up to 2 nodes, from n0002 up to n0003
-    if (( NUM_NODES == 1 )); then
-        NODES="n0002"
-    elif (( NUM_NODES == 2 )); then
-        NODES="n0002,n0003"
-    else
-        quit "Too many nodes requested"
-    fi
-    # Synthesize final command
-    CORES_PER_NODE=12
-    RESERVED_CORES=4
+function run_chizuru {
+     if (( NUM_NODES > 1 )); then
+         quit "Too many nodes requested"
+     fi
+    # Overrides for local, GPU run
+    LOCAL_RUN=1
+    USE_CUDA=1
+    ##added by MK
+    CORES_PER_NODE=20
+    GPUS_PER_NODE=4
+    FB_PER_GPU=4000
+    ##RESERVED_CORES=2
     NUMA_PER_RANK=2
-    RAM_PER_NODE=30000
-    GPUS_PER_NODE=2
-    FB_PER_GPU=5000
-    source "$HTR_DIR"/jobscripts/jobscript_shared.sh
-    # Emit final command
-    mpiexec -H "$NODES" --bind-to none \
-            -x LD_LIBRARY_PATH -x HTR_DIR -x REALM_BACKTRACE -x LEGION_FREEZE_ON_ERROR \
-            $COMMAND
-    # Resources:
-    # 40230MB RAM per node
-    # 2 NUMA domains per node
-    # 6 cores per NUMA domain
-    # 2-way SMT per core
-    # 2 Tesla C2070 GPUs per node
-    # 6GB FB per GPU
+    ##added by MK
+    # Synthesize final command
+    ##CORES_PER_NODE="$(grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}')"
+    RAM_PER_NODE="$(free -m | head -2 | tail -1 | awk '{print $2}')"
+    RAM_PER_NODE=$(( RAM_PER_NODE / 2 ))
+    source "$HTR_DIR"/src/jobscript_shared.sh
+    $COMMAND
 }
 
-function run_quartz {
-   export QUEUE="${QUEUE:-pbatch}"
+ ##added by MK
+function run_juwels {
+   # export QUEUE="${QUEUE:-develgpus}"
+   RESOURCES=
+     RESOURCES=
+   if [[ "$QUEUE" == "develbooster" || "$QUEUE" == "booster" ]]; then
+      RESOURCES="gpu:4"
+   fi
+   if [[ "$QUEUE" == "batch" ]]; then
+      RESOURCES="mem96"
+   fi
+
    DEPS=
    if [[ ! -z "$AFTER" ]]; then
       DEPS="-d afterok:$AFTER"
    fi
+   CORES_PER_RANK=$(( 40/$RANKS_PER_NODE ))
+### sbatch the SLURM file OR
    sbatch --export=ALL \
-         -N "$NUM_NODES" -t "$WALLTIME" -p "$QUEUE" $DEPS \
-         -J prometeo \
-         "$HTR_DIR"/jobscripts/quartz.slurm
-   # Resources:
-   # 128GB RAM per node
-   # 2 NUMA domains per node
-   # 18 cores per NUMA domain
-}
-
-function run_galileo {
-    export QUEUE="${QUEUE:-gll_usr_gpuprod}"
-    RESOURCES=
-    if [[ "$QUEUE" == "gll_usr_gpuprod" ]]; then
-        RESOURCES="gpu:kepler:2"
-    fi
-    DEPS=
-    if [[ ! -z "$AFTER" ]]; then
-        DEPS="-d afterok:$AFTER"
-    fi
-    CORES_PER_RANK=$(( 36/$RANKS_PER_NODE ))
-    sbatch --export=ALL \
-        -N "$NUM_NODES" -t "$WALLTIME" -p "$QUEUE" --gres="$RESOURCES" $DEPS \
+        -N "$NUM_RANKS" -t 00:15:00 -p "$QUEUE" --gres="$RESOURCES" $DEPS \
         --ntasks-per-node="$RANKS_PER_NODE" --cpus-per-task="$CORES_PER_RANK" \
-        --account="$ACCOUNT" \
-        "$HTR_DIR"/jobscripts/galileo.slurm
-   # Resources:
-   # 118GB RAM per node
-   # 2 NUMA domains per node
-   # 18 cores per NUMA domain
-   # 1 nVidia K80 GPUs (seen as two K40 gpus)
-}
+        --account="$ACCOUNT"  "$HTR_DIR"/jobscripts/ghost.slurm
+## OR directly
+# source "$HTR_DIR"/jobscripts/jobscript_shared.sh
+#    $COMMAND
 
-function run_m100 {
-    export QUEUE="${QUEUE:-m100_usr_prod}"
-    DEPS=
-    if [[ ! -z "$AFTER" ]]; then
-        DEPS="-w done($AFTER)"
-    fi
-    SPECIALQ=
-    if [ $NUM_NODES -gt 16 ]; then
-       SPECIALQ="--qos=m100_qos_bprod"
-    fi
-    CORES_PER_RANK=$(( 128/$RANKS_PER_NODE ))
-    sbatch --export=ALL \
-        -N "$NUM_NODES" -t "$WALLTIME" -p "$QUEUE" --gres=gpu:4 $DEPS $SPECIALQ \
-        --ntasks-per-node="$RANKS_PER_NODE" --cpus-per-task="$CORES_PER_RANK" \
-         "$HTR_DIR"/jobscripts/m100.slurm
-   # Resources:
-   # 256GB RAM per node
-   # 2 NUMA domains per node
-   # 64 cores per NUMA domain
-   # 4 nVidia Volta V100
+ # Resources:
+# 192GB RAM per node
+# Framebuffer per GPU =16 GB= 16000 MiB
+# 2 NUMA domains per node
+# 40 cores per NUMA domain
+# 4 Tesla V100 SXM2 GPUs per node
 }
+ ##added by MK
 
-function run_local {
-    if (( NUM_NODES > 1 )); then
-        quit "Too many nodes requested"
-    fi
-    # Overrides for local, non-GPU run
-    LOCAL_RUN=1
-    USE_CUDA=0
-    RESERVED_CORES=2
-    NUMA_PER_RANK=1
-    # Synthesize final command
-    CORES_PER_NODE="$(grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}')"
-    RAM_PER_NODE="$(free -m | head -2 | tail -1 | awk '{print $2}')"
-    RAM_PER_NODE=$(( RAM_PER_NODE / 2 ))
-    source "$HTR_DIR"/jobscripts/jobscript_shared.sh
-    $COMMAND
-}
+
 
 ###############################################################################
 # Switch on machine
 ###############################################################################
-
-if [[ "$(uname -n)" == *"lassen"* ]]; then
-    run_lassen
-elif [[ "$(uname -n)" == *"yellowstone"* ]]; then
-    run_yellowstone
-elif [[ "$(uname -n)" == *"armstrong"* ]]; then
-    run_armstrong
-elif [[ "$(uname -n)" == *"sapling"* ]]; then
-    run_sapling
-elif [[ "$(uname -n)" == *"quartz"* ]]; then
-    run_quartz
-elif [[ "$(uname -n)" == *"r033c01s"* ]]; then
-    run_galileo
-elif [[ "$(hostname -d)" == *"m100"* ]]; then
-    run_m100
+if [[ "$(uname -n)" == *"juwels"* ]]; then
+    run_juwels
+elif [[ "$(uname -n)" == *"chizuru"* ]]; then
+    run_chizuru
 else
-    echo 'Hostname not recognized; assuming local machine run w/o GPUs'
+    echo 'Hostname not recognized; assuming local machine run w/o  GPUs'
     run_local
 fi
+
