@@ -35,7 +35,7 @@ ifdef HDF_ROOT
   export $(DYNLINK_PATH) := $($(DYNLINK_PATH)):$(HDF_ROOT)/lib
 endif
 REGENT := $(LEGION_DIR)/language/regent.py
-REGENT_FLAGS := -fflow 0 -finner 1 -fcuda-generate-cubin 1
+REGENT_FLAGS := -fflow 0 -finner 1
 ifeq ($(DEBUG), 1)
   REGENT_FLAGS += -g -fcuda 0 -fbounds-checks 1
   CFLAGS += -g
